@@ -34,6 +34,7 @@ class JacocoAndroidUnitTestReportExtension {
   ReportConfiguration html
   ReportConfiguration xml
   String destination
+  boolean integrationTestsEnabled
 
   JacocoAndroidUnitTestReportExtension(Collection<String> excludes) {
     this.excludes = excludes
@@ -41,5 +42,6 @@ class JacocoAndroidUnitTestReportExtension {
     this.html = new ReportConfiguration(true)
     this.xml = new ReportConfiguration(true)
     this.destination = null
+    integrationTestsEnabled = false
   }
 }

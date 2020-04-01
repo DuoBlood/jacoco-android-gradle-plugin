@@ -2,6 +2,7 @@ package com.dicedmelon.gradle.jacoco.android
 
 import org.gradle.api.GradleException
 import org.gradle.api.Plugin
+import org.gradle.api.Project
 import org.gradle.api.Task
 import org.gradle.api.file.FileTree
 import org.gradle.api.internal.project.ProjectInternal
@@ -25,14 +26,17 @@ class JacocoAndroidPlugin implements Plugin<ProjectInternal> {
     project.plugins.apply(JacocoPlugin)
 
     Plugin plugin = findAndroidPluginOrThrow(project.plugins)
-    Task jacocoTestReportTask = findOrCreateJacocoTestReportTask(project.tasks)
-    def variants = getVariants(project, plugin)
 
-    variants.all { variant ->
-      JacocoReport reportTask = createReportTask(project, variant)
-      jacocoTestReportTask.dependsOn reportTask
+    project.afterEvaluate {
+      Task jacocoTestReportTask = findOrCreateJacocoTestReportTask(project.tasks)
+      def variants = getVariants(project, plugin)
 
-      logTaskAdded(reportTask)
+      variants.all { variant ->
+        JacocoReport reportTask = createReportTask(project, variant)
+        jacocoTestReportTask.dependsOn reportTask
+        project.tasks { task -> logger.info(task.name) }
+        logTaskAdded(reportTask)
+      }
     }
   }
 
@@ -63,14 +67,21 @@ class JacocoAndroidPlugin implements Plugin<ProjectInternal> {
     def sourceDirs = sourceDirs(variant)
     def classesDir = classesDir(variant)
     def testTask = testTask(project.tasks, variant)
-    def executionData = executionDataFile(testTask)
     def kotlin = hasKotlin(project.plugins)
+    Task integrationTestTask = getTask(project, getIntegrationTaskName(variant))
+    boolean integrationTestsEnabled = project.jacocoAndroidUnitTestReport.integrationTestsEnabled && null != integrationTestTask
+    def executionData = executionDataFile(testTask, integrationTestsEnabled, project)
     JacocoReport reportTask = project.tasks.create("jacoco${testTask.name.capitalize()}Report",
         JacocoReport)
-    reportTask.dependsOn testTask
+    if(integrationTestsEnabled){
+      integrationTestTask.dependsOn testTask
+      reportTask.dependsOn integrationTestTask
+    }else {
+      reportTask.dependsOn testTask
+    }
     reportTask.group = "Reporting"
     reportTask.description = "Generates Jacoco coverage reports for the ${variant.name} variant."
-    reportTask.executionData.setFrom(project.files(executionData))
+    reportTask.executionData.setFrom(executionData)
     reportTask.sourceDirectories.setFrom(project.files(sourceDirs))
     FileTree javaTree = project.fileTree(dir: classesDir, excludes: project.jacocoAndroidUnitTestReport.excludes)
 
@@ -84,7 +95,7 @@ class JacocoAndroidPlugin implements Plugin<ProjectInternal> {
     }
     reportTask.reports {
       def destination = project.jacocoAndroidUnitTestReport.destination
-      
+
       csv.enabled project.jacocoAndroidUnitTestReport.csv.enabled
       html.enabled project.jacocoAndroidUnitTestReport.html.enabled
       xml.enabled project.jacocoAndroidUnitTestReport.xml.enabled
@@ -92,7 +103,7 @@ class JacocoAndroidPlugin implements Plugin<ProjectInternal> {
       if (csv.enabled) {
         csv.destination new File((destination == null) ? "${project.buildDir}/jacoco/jacoco.csv" : "${destination.trim()}/jacoco.csv")
       }
-      
+
       if (html.enabled) {
         html.destination new File((destination == null) ? "${project.buildDir}/jacoco/jacocoHtml" : "${destination.trim()}/jacocoHtml")
       }
@@ -116,12 +127,25 @@ class JacocoAndroidPlugin implements Plugin<ProjectInternal> {
     }
   }
 
+  static def getTask(Project project, String name) {
+    project.getTasksByName(name, false)?.getAt(0)
+  }
+
+  static String getIntegrationTaskName(def variant) {
+    String name = "create${variant.name.capitalize()}CoverageReport"
+    name
+  }
+
   static def testTask(TaskCollection<Task> tasks, variant) {
     tasks.getByName("test${variant.name.capitalize()}UnitTest")
   }
 
-  static def executionDataFile(Task testTask) {
-    testTask.jacoco.destinationFile.path
+  static def executionDataFile(Task testTask, boolean integrationTestsEnabled, ProjectInternal project) {
+    if(integrationTestsEnabled){
+      project.fileTree(dir: project.buildDir, includes: ['**/*.exec', '**/*.ec'])
+    } else {
+      project.files(testTask.jacoco.destinationFile.path)
+    }
   }
 
   private static boolean hasKotlin(PluginContainer plugins) {
